@@ -63,7 +63,7 @@ cd ncm
 pip install -r requirements.txt
 ```
 
-Python 3.10 or newer and a CUDA-capable PyTorch installation are recommended.
+Python 3.10 or newer. PyTorch uses CUDA when that device is present, and the Apple GPU otherwise.
 
 ## Evaluation
 

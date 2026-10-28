@@ -1,0 +1,27 @@
+[project]
+name = "ncm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Leo Newton", email = "leo.newton@icloud.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "huggingface-hub[cli]>=2.3.0",
+    "hydra-core>=1.3.8",
+    "numpy>=2.5.4",
+    "omegaconf>=2.3.1",
+    "regex>=2026.9.29",
+    "rouge-score>=0.1.2",
+    "sacrebleu>=2.6.0",
+    "torch>=2.14.1",
+    "transformers>=4.51",
+]
+
+[project.scripts]
+ncm = "ncm:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"

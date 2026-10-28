@@ -1,9 +1,10 @@
 import argparse, os, subprocess, sys
 
-import torch
 from omegaconf import OmegaConf
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
+from utils.device import visible_accelerators
 
 
 def main():
@@ -12,12 +13,12 @@ def main():
     ap.add_argument("--checkpoint-dir", required=True, help="directory with the files named under checkpoints:")
     ap.add_argument("--data-dir", default="", help="directory with the files named under data: (not needed for unconditional tasks)")
     ap.add_argument("--out", default="", help="output directory (default eval/<task>)")
-    ap.add_argument("--gpus", default="", help="comma-separated GPU ids (default: all visible)")
+    ap.add_argument("--gpus", default="", help="comma-separated CUDA ids (default: every visible CUDA device, or the Apple GPU)")
     ap.add_argument("--n", type=int, default=0, help="evaluate only the first n inputs")
     args, passthrough = ap.parse_known_args()
 
     cfg = OmegaConf.load(args.config)
-    gpus = args.gpus.split(",") if args.gpus else [str(i) for i in range(torch.cuda.device_count())]
+    gpus = visible_accelerators(args.gpus)
     if not gpus:
         sys.exit("no GPU visible; pass --gpus")
     out = args.out or os.path.join("eval", cfg.task)
@@ -27,7 +28,9 @@ def main():
               "--nshards", str(len(gpus))] + (["--n", str(args.n)] if args.n else []) + passthrough
     procs = []
     for k, gpu in enumerate(gpus):
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, TOKENIZERS_PARALLELISM="false")
+        env = dict(os.environ, TOKENIZERS_PARALLELISM="false")
+        if gpu != "mps":
+            env["CUDA_VISIBLE_DEVICES"] = gpu
         log = open(os.path.join(out, f"shard_{k}.log"), "w")
         procs.append(subprocess.Popen(
             [sys.executable, os.path.join(ROOT, "scripts", "eval_shard.py"), *common,

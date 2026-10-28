@@ -6,6 +6,8 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+from utils.device import accelerator
+
 
 @dataclass
 class GenPPLResult:
@@ -33,7 +35,7 @@ def generation_perplexity(
     ref_model.eval()
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = str(accelerator())
     ref_model.to(device)
 
     if tokenizer.pad_token_id is None:

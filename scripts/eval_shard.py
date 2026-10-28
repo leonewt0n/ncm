@@ -5,6 +5,7 @@ sys.path.insert(0, os.environ.get("NCM_ROOT", os.getcwd()))
 from models.next_concept import NextConceptTransformer
 from tokenization.vqvae_tokenizer import VQVAETokenizer
 from transformers import AutoTokenizer
+from utils.device import accelerator, as_float64
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--config", required=True)
@@ -46,9 +47,10 @@ CFG.tokenizer.vqvae.checkpoint_path = os.path.join(ck, CFG.checkpoints.tokenizer
 for key, name in (('vocab_file_path', 'bpe_vocab'), ('merges_file_path', 'bpe_merges')):
     if CFG.checkpoints.get(name):
         CFG.tokenizer.pre_tokenizer[key] = os.path.join(ck, CFG.checkpoints[name])
+DEV = accelerator()
 tk = VQVAETokenizer.from_config(CFG.tokenizer)
-tk.vqvae = tk.vqvae.cuda().eval()
-net = NextConceptTransformer(vqvae_local=tk.vqvae, config=CFG.model).cuda()
+tk.vqvae = tk.vqvae.to(DEV).eval()
+net = NextConceptTransformer(vqvae_local=tk.vqvae, config=CFG.model).to(DEV)
 sd = torch.load(os.path.join(ck, CFG.checkpoints.generator), map_location="cpu", weights_only=False)
 net.load_state_dict(sd["model"], strict=True)
 net.eval()
@@ -57,13 +59,15 @@ EOS, PAD = tk.pre_tokenizer.eos_token_id, tk.pre_tokenizer.pad_token_id
 
 
 def load_allowance(spec):
+    # Float64 bookkeeping cannot live on the Apple GPU.
+    loc = "cpu" if DEV.type != "cuda" else "cuda"
     if ":" in spec:
         path, ref = spec.split(":", 1)
-        obj = torch.load(os.path.join(ck, path), map_location="cuda", weights_only=False)
+        obj = torch.load(os.path.join(ck, path), map_location=loc, weights_only=False)
         for k in ref.split("."):
             obj = obj[k]
         return obj.double()
-    return torch.load(os.path.join(ck, spec), map_location="cuda").double()
+    return torch.load(os.path.join(ck, spec), map_location=loc).double()
 
 
 ALLOW = load_allowance(str(G.frequency_allowance)) if G.get("frequency_allowance") else None
@@ -100,7 +104,7 @@ def pick_tokens(logits):
     if freq <= 0 and not ADJ:
         return logits.argmax(-1)
     B, T, V = logits.shape
-    lg = logits.double()
+    lg = as_float64(logits)
     allow = (ALLOW[:V] * T)[None, :] if ALLOW is not None else None
     al = ADJ[0] if ADJ else 0.0
     aw = int(ADJ[1]) if ADJ and len(ADJ) > 1 else 1
@@ -153,8 +157,8 @@ if UNCOND:
         torch.manual_seed(seed)
         for s in range(0, n, bs):
             B = min(bs, n - s)
-            l0 = torch.multinomial(L0_P.cpu(), B * L0, replacement=True).view(B, L0).cuda() if L0_P is not None else None
-            hyps += run(torch.full((B, 1), EOS, device="cuda"), l0)
+            l0 = torch.multinomial(L0_P.cpu(), B * L0, replacement=True).view(B, L0).to(DEV) if L0_P is not None else None
+            hyps += run(torch.full((B, 1), EOS, device=DEV), l0)
             sample_seed += [seed] * B
         print(f"  shard{a.shard} seed {seed}: {n} samples", flush=True)
     idxs = list(range(len(hyps)))
@@ -163,7 +167,7 @@ if UNCOND:
 else:
     for s in range(0, len(idxs), bs):
         batch = idxs[s:s + bs]
-        hyps += run(torch.tensor([prefix(items[i]) for i in batch], device="cuda"))
+        hyps += run(torch.tensor([prefix(items[i]) for i in batch], device=DEV))
         if a.shard == 0 and (s // bs) % 10 == 0:
             print(f"  shard0 {s}/{len(idxs)}", flush=True)
     out = {"idxs": idxs, "hyps": hyps, "refs": [r if isinstance(r, str) else dec(r) for r in (refs[i] for i in idxs)]}
